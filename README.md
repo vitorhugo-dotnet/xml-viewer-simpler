@@ -31,7 +31,11 @@ The component also reads a `data` attribute or text content when it is connected
 ```html
 <script src="xml-viewer.js"></script>
 <script>
-  const viewer = SimpleXMLViewer.create('<root><user id="1">Hugo</user></root>');
+  const viewer = SimpleXMLViewer.create('<root><user id="1">Hugo</user></root>', {
+                        wrap: false,
+                        spacing: 1.25,
+                        search: true
+                    });
   document.body.append(viewer);
 
   viewer.addEventListener('select', event => {
