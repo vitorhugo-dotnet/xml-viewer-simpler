@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Simple XML Viewer example</title>
+<script src="../xml-viewer.js"></script>
+<simple-xml-viewer id="xml"></simple-xml-viewer>
+<script>
+  var viewer = document.querySelector('#xml');
+  viewer.data = '<?xml version="1.0"?><root><user id="1"><name>Hugo</name></user></root>';
+  viewer.addEventListener('select', function (event) {
+    console.log('selected XML element:', event.detail);
+  });
+</script>
+</html>

@@ -1,0 +1,6 @@
+<!doctype html>
+<meta charset="utf-8">
+<simple-xml-viewer></simple-xml-viewer>
+<script src="../xml-viewer.js"></script>
+<script>window.lastSelection = null;
+document.querySelector('simple-xml-viewer').addEventListener('select', event => { window.lastSelection = event.detail; });</script>
