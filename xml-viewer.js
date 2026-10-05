@@ -1,7 +1,7 @@
 /*
  * Derived from juliangruber/xml-viewer (MIT):
  * https://github.com/juliangruber/xml-viewer
- * forked by: https://github.com/vitorhugo-dotnet/xml-viewer-simpler
+ * forkd by: https://github.com/vitorhugo-dotnet/xml-viewer-simpler
  * Copyright (c) 2015 Julian Gruber
  */
 (function (global) {
@@ -19,15 +19,22 @@
       --xml-viewer-muted: #6e7781;
       --xml-viewer-selection: #fff3bf;
       --xml-viewer-error: #cf222e;
+      --xml-viewer-line-height: 1.25;
       display: block;
       color: var(--xml-viewer-foreground);
       background: var(--xml-viewer-background);
-      font: 14px/1.55 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font: 14px/var(--xml-viewer-line-height) ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
     }
-    .xml-viewer { overflow: auto; padding: 0.75rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .toolbar { display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.5rem; border-bottom: 1px solid #d0d7de; }
+    .toolbar[hidden] { display: none; }
+    .search-input { flex: 1; min-width: 8rem; padding: 0.3rem 0.45rem; border: 1px solid #8c959f; border-radius: 4px; font: inherit; }
+    .search-nav { padding: 0.2rem 0.45rem; border: 1px solid #8c959f; border-radius: 4px; background: #fff; color: inherit; cursor: pointer; }
+    .search-nav:disabled { opacity: 0.45; cursor: default; }
+    .search-count { min-width: 5.5rem; color: var(--xml-viewer-muted); text-align: center; font-size: 0.9em; }
+    .xml-viewer { max-height: 64vh; overflow: auto; padding: 0.5rem; white-space: pre-wrap; overflow-wrap: anywhere; }
     .declaration, .doctype, .comment, .instruction { color: var(--xml-viewer-muted); }
     .element { margin: 0; }
-    .header, .closing, .content-item { min-height: 1.55em; }
+    .header, .closing, .content-item { min-height: 1em; }
     .header { display: flex; align-items: baseline; width: fit-content; max-width: 100%; cursor: default; }
     .header.selected, .closing.selected, .content-item.selected { background: var(--xml-viewer-selection); }
     .node-label { cursor: pointer; }
@@ -43,9 +50,10 @@
     .toggle:focus-visible, .node-label:focus-visible { outline: 2px solid var(--xml-viewer-element); outline-offset: 1px; }
     .toggle-spacer { display: inline-block; width: 1.5em; flex: 0 0 1.5em; }
     .contents { padding-left: 1.5em; }
-    .content-item { white-space: pre-wrap; }
     .closing { width: fit-content; }
-    .error { color: var(--xml-viewer-error); white-space: pre-wrap; }
+    .error { color: var(--xml-viewer-error); }
+    .search-match { background: #fff3a3; color: inherit; }
+    .search-match.current { background: #ffb74d; outline: 1px solid #d97706; }
   `;
 
   /* ==================== XML PARSING ==================== */
@@ -218,9 +226,32 @@
       super();
       this.attachShadow({ mode: 'open' });
       var style = make('style', '', styles);
+      this._toolbar = make('div', 'toolbar');
+      this._searchInput = make('input', 'search-input');
+      this._searchInput.type = 'search';
+      this._searchInput.placeholder = 'Buscar no XML';
+      this._searchInput.setAttribute('aria-label', 'Buscar no XML');
+      this._searchInput.addEventListener('input', this._search.bind(this));
+      this._searchCount = make('span', 'search-count', '0 resultados');
+      this._previousMatch = make('button', 'search-nav', '↑');
+      this._previousMatch.type = 'button';
+      this._previousMatch.title = 'Ocorrência anterior';
+      this._previousMatch.setAttribute('aria-label', 'Ocorrência anterior');
+      this._previousMatch.disabled = true;
+      this._previousMatch.addEventListener('click', this._navigateMatch.bind(this, -1));
+      this._nextMatch = make('button', 'search-nav', '↓');
+      this._nextMatch.type = 'button';
+      this._nextMatch.title = 'Próxima ocorrência';
+      this._nextMatch.setAttribute('aria-label', 'Próxima ocorrência');
+      this._nextMatch.disabled = true;
+      this._nextMatch.addEventListener('click', this._navigateMatch.bind(this, 1));
+      this._toolbar.append(this._searchInput, this._searchCount, this._previousMatch, this._nextMatch);
       this._view = make('div', 'xml-viewer');
-      this.shadowRoot.append(style, this._view);
+      this.shadowRoot.append(style, this._toolbar, this._view);
       this._data = null;
+      this._options = { wrap: true, spacing: 1.25, search: false };
+      this._searchMatches = [];
+      this._currentSearchMatch = -1;
       this._selected = null;
       this._selectedRow = null;
       this._error = null;
@@ -246,6 +277,26 @@
     set data(value) {
       this._data = String(value == null ? '' : value);
       this._render();
+    }
+
+    get options() { return Object.assign({}, this._options); }
+    set options(value) {
+      value = value || {};
+      var spacing = Number(value.spacing);
+      this._options = {
+        wrap: value.wrap !== false,
+        spacing: Number.isFinite(spacing) && spacing > 0 ? spacing : 1.25,
+        search: value.search === true
+      };
+      this.style.setProperty('--xml-viewer-line-height', String(this._options.spacing));
+      this._view.style.whiteSpace = this._options.wrap ? 'pre-wrap' : 'pre';
+      this._view.style.overflowWrap = this._options.wrap ? 'anywhere' : 'normal';
+      this._toolbar.hidden = !this._options.search;
+      if (this._options.search) this._applySearch(this._searchInput.value);
+      else {
+        this._removeSearchHighlights();
+        this._clearSearchState();
+      }
     }
 
     get selectedNode() {
@@ -284,6 +335,73 @@
       });
     }
 
+    _clearSearchState() {
+      this._searchMatches = [];
+      this._currentSearchMatch = -1;
+      this._previousMatch.disabled = true;
+      this._nextMatch.disabled = true;
+      this._searchCount.textContent = '0 resultados';
+    }
+
+    _removeSearchHighlights() {
+      Array.prototype.forEach.call(this._view.querySelectorAll('mark.search-match'), function (mark) {
+        mark.replaceWith(document.createTextNode(mark.textContent));
+      });
+    }
+
+    _search() {
+      this._applySearch(this._searchInput.value);
+    }
+
+    _applySearch(term) {
+      if (!this._options.search) return;
+      this._removeSearchHighlights();
+      this._searchMatches = [];
+      this._currentSearchMatch = -1;
+      term = String(term || '').trim();
+      if (term) {
+        var walker = document.createTreeWalker(this._view, NodeFilter.SHOW_TEXT);
+        var textNodes = [];
+        var textNode;
+        while ((textNode = walker.nextNode())) textNodes.push(textNode);
+        var normalizedTerm = term.toLocaleLowerCase();
+        textNodes.forEach(function (node) {
+          var text = node.nodeValue;
+          var normalizedText = text.toLocaleLowerCase();
+          var position = 0;
+          var fragment = document.createDocumentFragment();
+          var found = false;
+          var matchAt;
+          while ((matchAt = normalizedText.indexOf(normalizedTerm, position)) !== -1) {
+            if (matchAt > position) fragment.appendChild(document.createTextNode(text.slice(position, matchAt)));
+            var mark = make('mark', 'search-match', text.slice(matchAt, matchAt + term.length));
+            fragment.appendChild(mark);
+            this._searchMatches.push(mark);
+            position = matchAt + term.length;
+            found = true;
+          }
+          if (found) {
+            if (position < text.length) fragment.appendChild(document.createTextNode(text.slice(position)));
+            node.replaceWith(fragment);
+          }
+        }, this);
+      }
+      this._previousMatch.disabled = this._searchMatches.length === 0;
+      this._nextMatch.disabled = this._searchMatches.length === 0;
+      this._searchCount.textContent = this._searchMatches.length + ' resultado(s)';
+      if (this._searchMatches.length) this._navigateMatch(1);
+    }
+
+    _navigateMatch(direction) {
+      if (!this._searchMatches.length) return;
+      if (this._currentSearchMatch >= 0) this._searchMatches[this._currentSearchMatch].classList.remove('current');
+      this._currentSearchMatch = (this._currentSearchMatch + direction + this._searchMatches.length) % this._searchMatches.length;
+      var current = this._searchMatches[this._currentSearchMatch];
+      current.classList.add('current');
+      this._searchCount.textContent = (this._currentSearchMatch + 1) + '/' + this._searchMatches.length;
+      current.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+
     _render() {
       this.clearSelection();
       this._error = null;
@@ -302,6 +420,7 @@
         this._view.appendChild(make('div', 'error', 'XML parsing error: ' + error.message));
         this.dispatchEvent(new CustomEvent('error', { detail: error }));
       }
+      if (this._options.search) this._applySearch(this._searchInput.value);
     }
   }
 
@@ -312,8 +431,9 @@
   /* ==================== PUBLIC API ==================== */
   global.SimpleXMLViewer = Object.freeze({
     tagName: 'simple-xml-viewer',
-    create: function (data) {
+    create: function (data, options) {
       var viewer = global.document.createElement('simple-xml-viewer');
+      viewer.options = options;
       if (data !== undefined) viewer.data = data;
       return viewer;
     }
