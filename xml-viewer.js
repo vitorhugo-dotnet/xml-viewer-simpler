@@ -1,6 +1,7 @@
 /*
  * Derived from juliangruber/xml-viewer (MIT):
  * https://github.com/juliangruber/xml-viewer
+ * forked by: https://github.com/vitorhugo-dotnet/xml-viewer-simpler
  * Copyright (c) 2015 Julian Gruber
  */
 (function (global) {
