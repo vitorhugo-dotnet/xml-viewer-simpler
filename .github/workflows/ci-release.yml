@@ -1,0 +1,71 @@
+name: CI and GitHub Release
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install development dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run browser tests
+        run: npm test
+
+  build:
+    name: Build release file
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Create standalone release file
+        run: |
+          mkdir release
+          cp xml-viewer.js release/index.js
+          test -s release/index.js
+          cmp xml-viewer.js release/index.js
+          if grep -En '\brequire[[:space:]]*\(|^[[:space:]]*import([[:space:]]|\{|\*)|\bfetch[[:space:]]*\(' release/index.js; then
+            echo "Release file contains a runtime dependency or fetch call" >&2
+            exit 1
+          fi
+      - name: Upload standalone release file
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-index
+          path: release/index.js
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download standalone release file
+        uses: actions/download-artifact@v4
+        with:
+          name: release-index
+          path: release
+      - name: Publish release with index.js only
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: release/index.js
